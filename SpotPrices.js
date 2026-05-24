@@ -7,6 +7,22 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+
+class SpotPriceTimeRange {
+    constructor(from, to, minPrice, maxPrice) {
+        this.from = from;
+        this.to = to;
+        this.minPrice = minPrice;
+        this.maxPrice = maxPrice;
+    }
+
+    toString() {
+        const from = this.from.toISOString();
+        const to = this.to.toISOString();
+        return `SpotPriceTimeRange(minPrice=${this.minPrice}, maxPrice=${this.maxPrice}, from=${from}, to=${to})`;
+    }
+}
+
 class SpotPriceEntry {
     constructor(price, validFrom, validTo) {
         this.price = price;
@@ -20,6 +36,12 @@ class SpotPriceEntry {
 
     get durationHours() {
         return this.durationMs / (1000 * 60 * 60);
+    }
+
+    toString() {
+        const from = this.validFrom.toISOString();
+        const to = this.validTo.toISOString();
+        return `SpotPriceEntry(price=${this.price}, validFrom=${from}, validTo=${to}, durationHours=${this.durationHours.toFixed(2)})`;
     }
 }
 
@@ -152,37 +174,50 @@ class SpotPrices {
     }
 
     /**
-     * Return contiguous timespans where the price is <= 0.
-     * Each span is an object: { validFrom: Date, validTo: Date, entries: SpotPriceEntry[] }
+     * Return the longest contiguous timespans where the price is below or equal to maxPrice.
+     * Each span is returned as a SpotPriceTimeRange instance.
      * If no entries or none match, returns an empty array.
+     *
+     * @param {number} maxPrice
+     * @returns {SpotPriceTimeRange[]}
      */
-    getNegativePriceSpans() {
-        if (!Array.isArray(this.#entries) || this.#entries.length === 0) return [];
+    getTimeRangeBelow(maxPrice) {
+        if (typeof maxPrice !== 'number' || !Array.isArray(this.#entries) || this.#entries.length === 0) {
+            return [];
+        }
 
-        const spans = [];
+        const ranges = [];
         let current = null;
 
         for (const entry of this.#entries) {
             if (typeof entry.price !== 'number') continue;
 
-            if (entry.price <= 0) {
+            if (entry.price <= maxPrice) {
                 if (!current) {
-                    current = { validFrom: entry.validFrom, validTo: entry.validTo, entries: [entry] };
+                    current = {
+                        from: entry.validFrom,
+                        to: entry.validTo,
+                        prices: [entry.price]
+                    };
                 } else {
-                    // extend span
-                    current.validTo = entry.validTo;
-                    current.entries.push(entry);
+                    current.to = entry.validTo;
+                    current.prices.push(entry.price);
                 }
-            } else {
-                if (current) {
-                    spans.push(current);
-                    current = null;
-                }
+            } else if (current) {
+                const minPrice = Math.min(...current.prices);
+                const maxPriceInRange = Math.max(...current.prices);
+                ranges.push(new SpotPriceTimeRange(current.from, current.to, minPrice, maxPriceInRange));
+                current = null;
             }
         }
 
-        if (current) spans.push(current);
-        return spans;
+        if (current) {
+            const minPrice = Math.min(...current.prices);
+            const maxPriceInRange = Math.max(...current.prices);
+            ranges.push(new SpotPriceTimeRange(current.from, current.to, minPrice, maxPriceInRange));
+        }
+
+        return ranges;
     }
 
     /**

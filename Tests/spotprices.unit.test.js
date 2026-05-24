@@ -106,6 +106,8 @@ test('All public properties and SpotPriceEntry behavior', async (t) => {
   // duration getters on the entry object should exist and return numbers
   assert.equal(typeof firstEntry.durationMs, 'number');
   assert.equal(typeof firstEntry.durationHours, 'number');
+  assert.equal(typeof firstEntry.toString, 'function');
+  assert.match(firstEntry.toString(), /SpotPriceEntry\(price=\d+(?:\.\d+)?, validFrom=.*Z, validTo=.*Z, durationHours=\d+\.\d{2}\)/);
 
   // hasTomorrowsPrices is boolean
   assert.equal(typeof sp.hasTomorrowsPrices, 'boolean');
@@ -130,21 +132,19 @@ test('All public properties and SpotPriceEntry behavior', async (t) => {
   }
 });
 
-test('getNonPositivePriceSpans returns contiguous spans with price <= 0', async (t) => {
+test('getTimeRangeBelow returns SpotPriceTimeRange objects for price <= maxPrice', async (t) => {
   const sp = new SpotPrices();
-  const spans = sp.getNegativePriceSpans();
-  assert.ok(Array.isArray(spans));
+  const ranges = sp.getTimeRangeBelow(0);
+  assert.ok(Array.isArray(ranges));
 
-  for (const span of spans) {
-    assert.ok(span.validFrom instanceof Date);
-    assert.ok(span.validTo instanceof Date);
-    assert.ok(Array.isArray(span.entries));
-    assert.ok(span.entries.length > 0);
-    // all entries in the span must have price <= 0
-    assert.ok(span.entries.every(e => typeof e.price === 'number' && e.price <= 0));
-    // span.validFrom should equal first entry's validFrom
-    assert.equal(span.validFrom.getTime(), span.entries[0].validFrom.getTime());
-    // span.validTo should equal last entry's validTo
-    assert.equal(span.validTo.getTime(), span.entries[span.entries.length - 1].validTo.getTime());
+  for (const range of ranges) {
+    assert.ok(range.from instanceof Date);
+    assert.ok(range.to instanceof Date);
+    assert.equal(typeof range.minPrice, 'number');
+    assert.equal(typeof range.maxPrice, 'number');
+    assert.ok(range.minPrice <= 0);
+    assert.ok(range.maxPrice <= 0);
+    assert.ok(range.from < range.to, 'range start should be before range end');
+    assert.match(range.toString(), /SpotPriceTimeRange\(minPrice=.*?, maxPrice=.*?, from=.*Z, to=.*Z\)/);
   }
 });

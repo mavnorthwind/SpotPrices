@@ -8,3 +8,6 @@ if (!spotPrices.hasData) {
 }
 
 console.log(`Minimum price: ${spotPrices.minTodayPrice} at ${spotPrices.minTodayPriceDate}`);
+console.log(`Prices under 0 today: ${spotPrices.getTimeRangeBelow(0)}`);
+console.log(`Prices under 10 today: ${spotPrices.getTimeRangeBelow(1)}`);
+
