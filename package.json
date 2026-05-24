@@ -5,7 +5,7 @@
   "main": "main.js",
   "type": "module",
   "scripts": {
-    "test": "node Tests/SpotPricesTest.js",
+    "test": "node --test",
     "start": "node main.js"
   },
   "author": "",
