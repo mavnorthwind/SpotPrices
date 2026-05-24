@@ -61,13 +61,14 @@ class SpotPrices {
 
     /**
      * Create a new SpotPrices instance
+     * @param {object|null} [rawSpotPriceData] - Optional fixture data for tests.
      */
-    constructor() {
+    constructor(rawSpotPriceData = null) {
         this.#cachedFilePath = path.join(
                     process.main ? path.dirname(process.main.filename) : __dirname,
                     'spotPricesCache.json');
 
-        this.#readCachedPrices();
+        this.#readCachedPrices(rawSpotPriceData);
     }
 
     get hasData() { return !(this.#spotpricedata === undefined); }
@@ -334,43 +335,48 @@ class SpotPrices {
     }
 
     /**
-     * Read cached spot prices
+     * Read cached spot prices.
+     * @param {object|null} rawSpotPriceData - Optional fixture data for tests.
      * @returns true if cached prices were read, else false
      */
-    #readCachedPrices() {
+    #readCachedPrices(rawSpotPriceData = null) {
         try {
-            if (fsSync.existsSync(this.#cachedFilePath)) {
+            if (rawSpotPriceData !== null) {
+                this.#spotpricedata = rawSpotPriceData;
+            } else if (fsSync.existsSync(this.#cachedFilePath)) {
                 const data = fsSync.readFileSync(this.#cachedFilePath, 'utf8');
                 this.#spotpricedata = JSON.parse(data);
-
-                if (this.#spotpricedata.unit != "EUR / MWh")
-                    throw "Unit returned by spotprices.info has changes - no longer 'EUR / MWh'";
-
-                this.#unit = "ct/kWh";
-
-                // Convert from EUR/MWh to ct/kWh and build combined entries
-                const convertedPrices = this.#spotpricedata.price.map(p => Math.round(p) / 10);
-                const times = this.#spotpricedata.unix_seconds.map(d => new Date(d * 1000));
-
-                // Determine default interval (fallback to 1 hour)
-                const defaultInterval = (times.length > 1) ? (times[1].getTime() - times[0].getTime()) : 60 * 60 * 1000;
-
-                        this.#entries = times.map((t, i) => {
-                    const validFrom = t;
-                    const validTo = (i + 1 < times.length) ? times[i + 1] : new Date(t.getTime() + defaultInterval);
-                    return new SpotPriceEntry(convertedPrices[i], validFrom, validTo);
-                });
-
-                // Keep backward-compatible arrays
-                this.#prices = this.#entries.map(e => e.price);
-                this.#dates = this.#entries.map(e => e.validFrom);
-
-                this.#minDate = new Date(Math.min(...this.#dates.map(d => d.getTime())));
-                this.#maxDate = new Date(Math.max(...this.#dates.map(d => d.getTime())));
-
-                this.#updateTimestamp = this.#spotpricedata.updateTimestamp;
-                return true;
             }
+
+            if (!this.#spotpricedata) return false;
+
+            if (this.#spotpricedata.unit != "EUR / MWh")
+                throw "Unit returned by spotprices.info has changes - no longer 'EUR / MWh'";
+
+            this.#unit = "ct/kWh";
+
+            // Convert from EUR/MWh to ct/kWh and build combined entries
+            const convertedPrices = this.#spotpricedata.price.map(p => Math.round(p) / 10);
+            const times = this.#spotpricedata.unix_seconds.map(d => new Date(d * 1000));
+
+            // Determine default interval (fallback to 1 hour)
+            const defaultInterval = (times.length > 1) ? (times[1].getTime() - times[0].getTime()) : 60 * 60 * 1000;
+
+            this.#entries = times.map((t, i) => {
+                const validFrom = t;
+                const validTo = (i + 1 < times.length) ? times[i + 1] : new Date(t.getTime() + defaultInterval);
+                return new SpotPriceEntry(convertedPrices[i], validFrom, validTo);
+            });
+
+            // Keep backward-compatible arrays
+            this.#prices = this.#entries.map(e => e.price);
+            this.#dates = this.#entries.map(e => e.validFrom);
+
+            this.#minDate = new Date(Math.min(...this.#dates.map(d => d.getTime())));
+            this.#maxDate = new Date(Math.max(...this.#dates.map(d => d.getTime())));
+
+            this.#updateTimestamp = this.#spotpricedata.updateTimestamp;
+            return true;
         } catch (error) {
             console.error("Error reading saved spot prices:", error);
         }

@@ -2,6 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import SpotPrices from '../SpotPrices.js';
 
+const fixtureSpotPriceData = {
+  unit: 'EUR / MWh',
+  unix_seconds: [1672531200, 1672534800, 1672538400, 1672542000, 1672545600, 1672549200, 1672552800, 1672556400, 1672560000, 1672563600],
+  price: [10, 0, -10, -20, 20, 0, -10, 30, -30, -40],
+  updateTimestamp: '2026-01-01T00:00:00.000Z'
+};
+
+const makeFixtureSpotPrices = () => new SpotPrices(fixtureSpotPriceData);
+
 test('SpotPrices loads cached data and basic properties are valid', async (t) => {
   const sp = new SpotPrices();
 
@@ -147,4 +156,25 @@ test('getTimeRangeBelow returns SpotPriceTimeRange objects for price <= maxPrice
     assert.ok(range.from < range.to, 'range start should be before range end');
     assert.match(range.toString(), /SpotPriceTimeRange\(minPrice=.*?, maxPrice=.*?, from=.*Z, to=.*Z\)/);
   }
+});
+
+test('fixture dataset returns expected time ranges below threshold', async (t) => {
+  const sp = makeFixtureSpotPrices();
+  const ranges = sp.getTimeRangeBelow(0);
+  assert.equal(ranges.length, 3);
+
+  assert.equal(ranges[0].from.toISOString(), '2023-01-01T01:00:00.000Z');
+  assert.equal(ranges[0].to.toISOString(), '2023-01-01T04:00:00.000Z');
+  assert.equal(ranges[0].minPrice, -2);
+  assert.equal(ranges[0].maxPrice, 0);
+
+  assert.equal(ranges[1].from.toISOString(), '2023-01-01T05:00:00.000Z');
+  assert.equal(ranges[1].to.toISOString(), '2023-01-01T07:00:00.000Z');
+  assert.equal(ranges[1].minPrice, -1);
+  assert.equal(ranges[1].maxPrice, 0);
+
+  assert.equal(ranges[2].from.toISOString(), '2023-01-01T08:00:00.000Z');
+  assert.equal(ranges[2].to.toISOString(), '2023-01-01T10:00:00.000Z');
+  assert.equal(ranges[2].minPrice, -4);
+  assert.equal(ranges[2].maxPrice, -3);
 });
