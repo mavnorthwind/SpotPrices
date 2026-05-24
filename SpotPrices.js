@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { error } from 'console';
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
@@ -7,6 +6,22 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+class SpotPriceEntry {
+    constructor(price, validFrom, validTo) {
+        this.price = price;
+        this.validFrom = validFrom;
+        this.validTo = validTo;
+    }
+
+    get durationMs() {
+        return this.validTo.getTime() - this.validFrom.getTime();
+    }
+
+    get durationHours() {
+        return this.durationMs / (1000 * 60 * 60);
+    }
+}
 
 class SpotPrices {
     #cachedFilePath = undefined;
@@ -16,6 +31,7 @@ class SpotPrices {
 
     #prices = undefined;
     #dates = undefined;
+    #entries = undefined; // combined { price, validFrom, validTo }
     #unit = undefined;
 
     #minDate = undefined;
@@ -43,6 +59,11 @@ class SpotPrices {
      */
     get dates() { return this.#dates; }
     /**
+     * Array of entries with combined price/timespan
+     * Each entry is a SpotPriceEntry instance.
+     */
+    get entries() { return this.#entries; }
+    /**
      * Unit of spot prices (usually ct/kWh)
      */
     get unit() { return this.#unit; }
@@ -65,51 +86,51 @@ class SpotPrices {
     /**
      * Returns the minimum price for today
      */
-    get minTodayPrice() { 
-        var extremaIndices = this.#getTodayHighLowIndex(this.#dates, this.#prices);
-        return this.#prices[extremaIndices.minIndex]; 
+    get minToday() {
+        const extremaIndices = this.#getTodayHighLowIndex(this.#entries);
+        const entry = this.#entries[extremaIndices.minIndex];
+        return { price: entry.price, validFrom: entry.validFrom, validTo: entry.validTo };
     }
+    get minTodayPrice() { return this.minToday.price; }
     /**
      * Returns the maximum price for today
      */
-    get maxTodayPrice() { 
-        var extremaIndices = this.#getTodayHighLowIndex(this.#dates, this.#prices);
-        return this.#prices[extremaIndices.maxIndex]; 
+    get maxToday() {
+        const extremaIndices = this.#getTodayHighLowIndex(this.#entries);
+        const entry = this.#entries[extremaIndices.maxIndex];
+        return { price: entry.price, validFrom: entry.validFrom, validTo: entry.validTo };
     }
+    get maxTodayPrice() { return this.maxToday.price; }
 
     /**
      * Returns the DateTime of today's minimum price
      */
-    get minTodayPriceDate() { 
-        var extremaIndices = this.#getTodayHighLowIndex(this.#dates, this.#prices);
-        return this.#dates[extremaIndices.minIndex]; 
-    }
+    get minTodayPriceDate() { return this.minToday.validFrom; }
 
     /**
      * Returns the DateTime of today's maximum price
      */
     get maxTodayPriceDate() {
-        var extremaIndices = this.#getTodayHighLowIndex(this.#dates, this.#prices);
-        return this.#dates[extremaIndices.maxIndex]; 
+        return this.maxToday.validFrom;
     }
 
     /**
      * Current spot price
      */
     get currentPrice() {
-        const nowIndex = this.#findIndexOfEntryEarlierOrEqual(this.#dates);
+        const nowIndex = this.#findIndexOfEntryEarlierOrEqual(this.#entries);
         if (nowIndex < 0)
-            throw error("Only future prices in dataset");
-        return this.#prices[nowIndex];
+            throw new Error("Only future prices in dataset");
+        return this.#entries[nowIndex].price;
     }
     /**
      * Date when the current price has been set. (Date)
      */
     get currentPriceDate() {
-        const nowIndex = this.#findIndexOfEntryEarlierOrEqual(this.#dates);
+        const nowIndex = this.#findIndexOfEntryEarlierOrEqual(this.#entries);
         if (nowIndex < 0)
-            throw error("Only future prices in dataset");
-        return new Date(this.#dates[nowIndex]);
+            throw new Error("Only future prices in dataset");
+        return this.#entries[nowIndex].validFrom;
     }
 
 
@@ -128,6 +149,40 @@ class SpotPrices {
         tomorrowStart.setDate(tomorrowStart.getDate() + 1);
 
         return this.#maxDate >= tomorrowStart;
+    }
+
+    /**
+     * Return contiguous timespans where the price is <= 0.
+     * Each span is an object: { validFrom: Date, validTo: Date, entries: SpotPriceEntry[] }
+     * If no entries or none match, returns an empty array.
+     */
+    getNegativePriceSpans() {
+        if (!Array.isArray(this.#entries) || this.#entries.length === 0) return [];
+
+        const spans = [];
+        let current = null;
+
+        for (const entry of this.#entries) {
+            if (typeof entry.price !== 'number') continue;
+
+            if (entry.price <= 0) {
+                if (!current) {
+                    current = { validFrom: entry.validFrom, validTo: entry.validTo, entries: [entry] };
+                } else {
+                    // extend span
+                    current.validTo = entry.validTo;
+                    current.entries.push(entry);
+                }
+            } else {
+                if (current) {
+                    spans.push(current);
+                    current = null;
+                }
+            }
+        }
+
+        if (current) spans.push(current);
+        return spans;
     }
 
     /**
@@ -178,9 +233,11 @@ class SpotPrices {
      * @returns Index or -1 if not found
      */
     #findIndexOfEntryEarlierOrEqual(datesArray, startingFrom = new Date()) {
+        // Accept either an array of Dates or an array of entries
         // start with -1 to indicate “none found”
-        return datesArray.reduce((bestIdx, date, idx) => {
-            if (date < startingFrom && (bestIdx === -1 || date > datesArray[bestIdx])) {
+        return datesArray.reduce((bestIdx, item, idx) => {
+            const date = item instanceof Date ? item : item.validFrom;
+            if (date < startingFrom && (bestIdx === -1 || date > (datesArray[bestIdx] instanceof Date ? datesArray[bestIdx] : datesArray[bestIdx].validFrom))) {
                 return idx;          // new best
             }
             return bestIdx;          // keep previous best
@@ -193,12 +250,9 @@ class SpotPrices {
      * @param {Number[]} prices 
      * @returns {minIndex, maxIndex}
      */
-    #getTodayHighLowIndex(dates, prices) {
-        if (!Array.isArray(dates) || !Array.isArray(prices)) {
-            throw new TypeError('dates und prices müssen Arrays sein');
-        }
-        if (dates.length !== prices.length) {
-            throw new Error('dates und prices müssen die gleiche Länge haben');
+    #getTodayHighLowIndex(entries) {
+        if (!Array.isArray(entries)) {
+            throw new TypeError('entries must be an array');
         }
 
         // heutiges Datum (lokal)
@@ -211,8 +265,9 @@ class SpotPrices {
         let lowestPrice = Infinity;
         let hasTodaysPrices = false;
 
-        for (let i = 0; i < dates.length; i++) {
-            const d = dates[i];
+        for (let i = 0; i < entries.length; i++) {
+            const entry = entries[i];
+            const d = entry.validFrom;
             if (!(d instanceof Date) || isNaN(d)) {
                 throw new Error(`Ungültiges Datum an Index ${i}`);
             }
@@ -221,7 +276,7 @@ class SpotPrices {
             if (key === today) {
                 hasTodaysPrices = true;
 
-                const p = prices[i];
+                const p = entry.price;
                 if (typeof p !== 'number' || isNaN(p)) {
                     throw new Error(`Ungültiger Preis an Index ${i}`);
                 }
@@ -238,7 +293,7 @@ class SpotPrices {
         }
 
         if (!hasTodaysPrices)
-            throw new error(`Don't have today's prices to determine min and max for today! Available data range: ${this.minDate}-${this.maxDate}`);
+            throw new Error(`Don't have today's prices to determine min and max for today! Available data range: ${this.minDate}-${this.maxDate}`);
 
         return { minIndex: lowestIndex, maxIndex: highestIndex };
     }
@@ -258,13 +313,25 @@ class SpotPrices {
 
                 this.#unit = "ct/kWh";
 
-                // Convert from EUR/MWh to ct/kWh
-                this.#prices = this.#spotpricedata.price.map(p => Math.round(p) / 10);
-                // Convert from unix_seconds to Date
-                this.#dates = this.#spotpricedata.unix_seconds.map(d => new Date(d * 1000));
+                // Convert from EUR/MWh to ct/kWh and build combined entries
+                const convertedPrices = this.#spotpricedata.price.map(p => Math.round(p) / 10);
+                const times = this.#spotpricedata.unix_seconds.map(d => new Date(d * 1000));
 
-                this.#minDate = new Date(Math.min(...this.#dates));
-                this.#maxDate = new Date(Math.max(...this.#dates));
+                // Determine default interval (fallback to 1 hour)
+                const defaultInterval = (times.length > 1) ? (times[1].getTime() - times[0].getTime()) : 60 * 60 * 1000;
+
+                        this.#entries = times.map((t, i) => {
+                    const validFrom = t;
+                    const validTo = (i + 1 < times.length) ? times[i + 1] : new Date(t.getTime() + defaultInterval);
+                    return new SpotPriceEntry(convertedPrices[i], validFrom, validTo);
+                });
+
+                // Keep backward-compatible arrays
+                this.#prices = this.#entries.map(e => e.price);
+                this.#dates = this.#entries.map(e => e.validFrom);
+
+                this.#minDate = new Date(Math.min(...this.#dates.map(d => d.getTime())));
+                this.#maxDate = new Date(Math.max(...this.#dates.map(d => d.getTime())));
 
                 this.#updateTimestamp = this.#spotpricedata.updateTimestamp;
                 return true;

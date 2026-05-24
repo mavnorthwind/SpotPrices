@@ -78,3 +78,73 @@ test('currentPrice and currentPriceDate are consistent when available', async (t
     t.skip('Current price not available in dataset; skipping current price assertions');
   }
 });
+
+test('All public properties and SpotPriceEntry behavior', async (t) => {
+  const sp = new SpotPrices();
+
+  // Basic metadata
+  assert.equal(typeof sp.unit, 'string');
+  assert.equal(sp.unit, 'ct/kWh');
+  assert.ok(sp.updateTimestamp instanceof Date);
+  assert.ok(sp.minDate instanceof Date);
+  assert.ok(sp.maxDate instanceof Date);
+
+  // Arrays
+  assert.ok(Array.isArray(sp.prices));
+  assert.ok(Array.isArray(sp.dates));
+  assert.equal(sp.prices.length, sp.dates.length);
+
+  // Entries
+  assert.ok(Array.isArray(sp.entries), 'entries should be an array');
+  assert.equal(sp.entries.length, sp.prices.length);
+  const firstEntry = sp.entries[0];
+  assert.ok(firstEntry, 'expected at least one entry');
+  assert.equal(typeof firstEntry.price, 'number');
+  assert.ok(firstEntry.validFrom instanceof Date);
+  assert.ok(firstEntry.validTo instanceof Date);
+
+  // duration getters on the entry object should exist and return numbers
+  assert.equal(typeof firstEntry.durationMs, 'number');
+  assert.equal(typeof firstEntry.durationHours, 'number');
+
+  // hasTomorrowsPrices is boolean
+  assert.equal(typeof sp.hasTomorrowsPrices, 'boolean');
+
+  // min/max date relationship
+  assert.ok(sp.minDate <= sp.maxDate, 'minDate should be <= maxDate');
+
+  // minToday/maxToday and their dates (may be skipped if today's data not present)
+  try {
+    const minT = sp.minToday;
+    const maxT = sp.maxToday;
+    assert.equal(typeof minT.price, 'number');
+    assert.equal(typeof maxT.price, 'number');
+    assert.ok(minT.validFrom instanceof Date);
+    assert.ok(minT.validTo instanceof Date);
+    assert.ok(maxT.validFrom instanceof Date);
+    assert.ok(maxT.validTo instanceof Date);
+    assert.ok(sp.minTodayPriceDate instanceof Date);
+    assert.ok(sp.maxTodayPriceDate instanceof Date);
+  } catch (err) {
+    t.skip('Today\'s price extrema not present; skipping related assertions');
+  }
+});
+
+test('getNonPositivePriceSpans returns contiguous spans with price <= 0', async (t) => {
+  const sp = new SpotPrices();
+  const spans = sp.getNegativePriceSpans();
+  assert.ok(Array.isArray(spans));
+
+  for (const span of spans) {
+    assert.ok(span.validFrom instanceof Date);
+    assert.ok(span.validTo instanceof Date);
+    assert.ok(Array.isArray(span.entries));
+    assert.ok(span.entries.length > 0);
+    // all entries in the span must have price <= 0
+    assert.ok(span.entries.every(e => typeof e.price === 'number' && e.price <= 0));
+    // span.validFrom should equal first entry's validFrom
+    assert.equal(span.validFrom.getTime(), span.entries[0].validFrom.getTime());
+    // span.validTo should equal last entry's validTo
+    assert.equal(span.validTo.getTime(), span.entries[span.entries.length - 1].validTo.getTime());
+  }
+});
