@@ -1,11 +1,12 @@
-'use strict';
+import axios from 'axios';
+import { error } from 'console';
+import fs from 'fs/promises';
+import fsSync from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-// module SpotPrices.js
-const axios = require('axios');
-const { error } = require('console');
-const fs = require('fs').promises;
-const fsSync = require('fs');
-const path = require('path');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 class SpotPrices {
     #cachedFilePath = undefined;
@@ -288,4 +289,4 @@ class SpotPrices {
     }
 }
 
-module.exports = SpotPrices;
+export default SpotPrices;
