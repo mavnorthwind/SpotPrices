@@ -1,3 +1,4 @@
+"use strict";
 var __classPrivateFieldSet = (this && this.__classPrivateFieldSet) || function (receiver, state, value, kind, f) {
     if (kind === "m") throw new TypeError("Private method is not writable");
     if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a setter");
@@ -9,15 +10,22 @@ var __classPrivateFieldGet = (this && this.__classPrivateFieldGet) || function (
     if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
     return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
 };
-var _SpotPrices_instances, _SpotPrices_cachedFilePath, _SpotPrices_spotpricedata, _SpotPrices_updateTimestamp, _SpotPrices_prices, _SpotPrices_dates, _SpotPrices_entries, _SpotPrices_unit, _SpotPrices_minDate, _SpotPrices_maxDate, _SpotPrices_findIndexOfEntryEarlierOrEqual, _SpotPrices_getTodayHighLowIndex, _SpotPrices_readCachedPrices, _SpotPrices_writeCachedPricesAsync;
-import axios from 'axios';
-import fs from 'fs/promises';
-import fsSync from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-export class SpotPriceTimeRange {
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+var _SpotPrices_instances, _SpotPrices_cachedFilePath, _SpotPrices_spotpricedata, _SpotPrices_updateTimestamp, _SpotPrices_prices, _SpotPrices_dates, _SpotPrices_entries, _SpotPrices_unit, _SpotPrices_minDate, _SpotPrices_maxDate, _SpotPrices_eventEmitter, _SpotPrices_findIndexOfEntryEarlierOrEqual, _SpotPrices_getTodayHighLowIndex, _SpotPrices_readCachedPrices, _SpotPrices_writeCachedPricesAsync;
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SpotPriceEntry = exports.SpotPriceTimeRange = void 0;
+const axios_1 = __importDefault(require("axios"));
+const promises_1 = __importDefault(require("fs/promises"));
+const fs_1 = __importDefault(require("fs"));
+const path_1 = __importDefault(require("path"));
+const url_1 = require("url");
+const events_1 = __importDefault(require("events"));
+const console_1 = __importDefault(require("console"));
+const currentFilePath = (0, url_1.fileURLToPath)(import.meta.url);
+const currentDirPath = path_1.default.dirname(currentFilePath);
+class SpotPriceTimeRange {
     constructor(from, to, minPrice, maxPrice) {
         this.from = from;
         this.to = to;
@@ -30,7 +38,8 @@ export class SpotPriceTimeRange {
         return `SpotPriceTimeRange(minPrice=${this.minPrice}, maxPrice=${this.maxPrice}, from=${from}, to=${to})`;
     }
 }
-export class SpotPriceEntry {
+exports.SpotPriceTimeRange = SpotPriceTimeRange;
+class SpotPriceEntry {
     constructor(price, validFrom, validTo) {
         this.price = price;
         this.validFrom = validFrom;
@@ -48,6 +57,14 @@ export class SpotPriceEntry {
         return `SpotPriceEntry(price=${this.price}, validFrom=${from}, validTo=${to}, durationHours=${this.durationHours.toFixed(2)})`;
     }
 }
+exports.SpotPriceEntry = SpotPriceEntry;
+/**
+ * Class for fetching and querying energy spot prices
+ * Events emitted:
+ * - Updated (start, end)
+ * - Warning (message)
+ * - Error (message)
+ */
 class SpotPrices {
     constructor(rawSpotPriceData = null) {
         _SpotPrices_instances.add(this);
@@ -60,9 +77,11 @@ class SpotPrices {
         _SpotPrices_unit.set(this, void 0);
         _SpotPrices_minDate.set(this, void 0);
         _SpotPrices_maxDate.set(this, void 0);
-        const basePath = process.argv[1] ? path.dirname(process.argv[1]) : __dirname;
-        __classPrivateFieldSet(this, _SpotPrices_cachedFilePath, path.join(basePath, 'spotPricesCache.json'), "f");
+        _SpotPrices_eventEmitter.set(this, void 0);
+        const basePath = process.argv[1] ? path_1.default.dirname(process.argv[1]) : currentDirPath;
+        __classPrivateFieldSet(this, _SpotPrices_cachedFilePath, path_1.default.join(basePath, 'spotPricesCache.json'), "f");
         __classPrivateFieldGet(this, _SpotPrices_instances, "m", _SpotPrices_readCachedPrices).call(this, rawSpotPriceData);
+        __classPrivateFieldSet(this, _SpotPrices_eventEmitter, new events_1.default(), "f");
     }
     get hasData() {
         return __classPrivateFieldGet(this, _SpotPrices_spotpricedata, "f") !== undefined;
@@ -187,19 +206,20 @@ class SpotPrices {
         const end = endDate.toISOString();
         const spotPricesUrl = `https://api.energy-charts.info/price?bzn=DE-LU&start=${start}&end=${end}`;
         try {
-            const res = await axios.get(spotPricesUrl, { timeout: 30000 });
-            console.debug('Got spot price data');
+            const res = await axios_1.default.get(spotPricesUrl, { timeout: 30000 });
+            console_1.default.debug('Got spot price data');
             res.data.updateTimestamp = now;
             await __classPrivateFieldGet(this, _SpotPrices_instances, "m", _SpotPrices_writeCachedPricesAsync).call(this, res.data);
             __classPrivateFieldGet(this, _SpotPrices_instances, "m", _SpotPrices_readCachedPrices).call(this);
         }
         catch (error) {
-            console.error(`Request for spot prices from ${spotPricesUrl} returned error:`, error);
+            console_1.default.error(`Request for spot prices from ${spotPricesUrl} returned error:`, error);
+            __classPrivateFieldGet(this, _SpotPrices_eventEmitter, "f").emit("Error", error);
             throw error;
         }
     }
 }
-_SpotPrices_cachedFilePath = new WeakMap(), _SpotPrices_spotpricedata = new WeakMap(), _SpotPrices_updateTimestamp = new WeakMap(), _SpotPrices_prices = new WeakMap(), _SpotPrices_dates = new WeakMap(), _SpotPrices_entries = new WeakMap(), _SpotPrices_unit = new WeakMap(), _SpotPrices_minDate = new WeakMap(), _SpotPrices_maxDate = new WeakMap(), _SpotPrices_instances = new WeakSet(), _SpotPrices_findIndexOfEntryEarlierOrEqual = function _SpotPrices_findIndexOfEntryEarlierOrEqual(datesArray, startingFrom = new Date()) {
+_SpotPrices_cachedFilePath = new WeakMap(), _SpotPrices_spotpricedata = new WeakMap(), _SpotPrices_updateTimestamp = new WeakMap(), _SpotPrices_prices = new WeakMap(), _SpotPrices_dates = new WeakMap(), _SpotPrices_entries = new WeakMap(), _SpotPrices_unit = new WeakMap(), _SpotPrices_minDate = new WeakMap(), _SpotPrices_maxDate = new WeakMap(), _SpotPrices_eventEmitter = new WeakMap(), _SpotPrices_instances = new WeakSet(), _SpotPrices_findIndexOfEntryEarlierOrEqual = function _SpotPrices_findIndexOfEntryEarlierOrEqual(datesArray, startingFrom = new Date()) {
     return datesArray.reduce((bestIdx, item, idx) => {
         const date = item instanceof Date ? item : item.validFrom;
         if (date < startingFrom && (bestIdx === -1 || date > (datesArray[bestIdx] instanceof Date ? datesArray[bestIdx] : datesArray[bestIdx].validFrom))) {
@@ -250,8 +270,8 @@ _SpotPrices_cachedFilePath = new WeakMap(), _SpotPrices_spotpricedata = new Weak
         if (rawSpotPriceData !== null) {
             __classPrivateFieldSet(this, _SpotPrices_spotpricedata, rawSpotPriceData, "f");
         }
-        else if (fsSync.existsSync(__classPrivateFieldGet(this, _SpotPrices_cachedFilePath, "f"))) {
-            const data = fsSync.readFileSync(__classPrivateFieldGet(this, _SpotPrices_cachedFilePath, "f"), 'utf8');
+        else if (fs_1.default.existsSync(__classPrivateFieldGet(this, _SpotPrices_cachedFilePath, "f"))) {
+            const data = fs_1.default.readFileSync(__classPrivateFieldGet(this, _SpotPrices_cachedFilePath, "f"), 'utf8');
             __classPrivateFieldSet(this, _SpotPrices_spotpricedata, JSON.parse(data), "f");
         }
         if (!__classPrivateFieldGet(this, _SpotPrices_spotpricedata, "f"))
@@ -273,19 +293,23 @@ _SpotPrices_cachedFilePath = new WeakMap(), _SpotPrices_spotpricedata = new Weak
         __classPrivateFieldSet(this, _SpotPrices_minDate, new Date(Math.min(...__classPrivateFieldGet(this, _SpotPrices_dates, "f").map((d) => d.getTime()))), "f");
         __classPrivateFieldSet(this, _SpotPrices_maxDate, new Date(Math.max(...__classPrivateFieldGet(this, _SpotPrices_dates, "f").map((d) => d.getTime()))), "f");
         __classPrivateFieldSet(this, _SpotPrices_updateTimestamp, __classPrivateFieldGet(this, _SpotPrices_spotpricedata, "f").updateTimestamp, "f");
+        __classPrivateFieldGet(this, _SpotPrices_eventEmitter, "f").emit("Updated", { start: __classPrivateFieldGet(this, _SpotPrices_minDate, "f"), end: __classPrivateFieldGet(this, _SpotPrices_maxDate, "f") });
         return true;
     }
     catch (error) {
-        console.error('Error reading saved spot prices:', error);
+        console_1.default.error('Error reading saved spot prices:', error);
+        __classPrivateFieldGet(this, _SpotPrices_eventEmitter, "f").emit("Error", error);
+        return false;
     }
-    return false;
 }, _SpotPrices_writeCachedPricesAsync = async function _SpotPrices_writeCachedPricesAsync(spotPriceData) {
     try {
-        await fs.writeFile(__classPrivateFieldGet(this, _SpotPrices_cachedFilePath, "f"), JSON.stringify(spotPriceData), { encoding: 'utf-8' });
+        await promises_1.default.writeFile(__classPrivateFieldGet(this, _SpotPrices_cachedFilePath, "f"), JSON.stringify(spotPriceData), { encoding: 'utf-8' });
     }
     catch (error) {
-        console.error('Error saving spot prices:', error);
+        console_1.default.error('Error saving spot prices:', error);
+        __classPrivateFieldGet(this, _SpotPrices_eventEmitter, "f").emit("Error", error);
         throw error;
     }
 };
-export default SpotPrices;
+exports.default = SpotPrices;
+//# sourceMappingURL=SpotPrices.js.map

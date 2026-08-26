@@ -2,10 +2,9 @@ import axios from 'axios';
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { EventEmitter } from 'events';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const currentDirPath = __dirname;
 
 type SpotPriceRawData = {
   unit: string;
@@ -52,6 +51,13 @@ export class SpotPriceEntry {
   }
 }
 
+/**
+ * Class for fetching and querying energy spot prices
+ * Events emitted:
+ * - Updated (start, end)
+ * - Warning (message)
+ * - Error (message)
+ */
 export default class SpotPrices {
   #cachedFilePath: string;
   #spotpricedata?: SpotPriceRawData;
@@ -63,8 +69,12 @@ export default class SpotPrices {
   #minDate?: Date;
   #maxDate?: Date;
 
+  #eventEmitter: EventEmitter;
+
   constructor(rawSpotPriceData: SpotPriceRawData | null = null) {
-    const basePath = process.argv[1] ? path.dirname(process.argv[1]) : __dirname;
+    this.#eventEmitter = new EventEmitter();
+
+    const basePath = process.argv[1] ? path.dirname(process.argv[1]) : currentDirPath;
     this.#cachedFilePath = path.join(basePath, 'spotPricesCache.json');
     this.#readCachedPrices(rawSpotPriceData);
   }
@@ -102,8 +112,17 @@ export default class SpotPrices {
   }
 
   get minToday(): { price: number; validFrom: Date; validTo: Date } {
-    const extremaIndices = this.#getTodayHighLowIndex(this.#entries);
-    const entry = this.#entries![extremaIndices.minIndex];
+    const entries = this.#entries;
+    if (!entries || entries.length === 0) {
+      throw new Error('No price data available');
+    }
+
+    const extremaIndices = this.#getTodayHighLowIndex(entries);
+    const entry = entries[extremaIndices.minIndex];
+    if (!entry) {
+      throw new Error('No minimum entry found for today');
+    }
+
     return { price: entry.price, validFrom: entry.validFrom, validTo: entry.validTo };
   }
 
@@ -112,8 +131,17 @@ export default class SpotPrices {
   }
 
   get maxToday(): { price: number; validFrom: Date; validTo: Date } {
-    const extremaIndices = this.#getTodayHighLowIndex(this.#entries);
-    const entry = this.#entries![extremaIndices.maxIndex];
+    const entries = this.#entries;
+    if (!entries || entries.length === 0) {
+      throw new Error('No price data available');
+    }
+
+    const extremaIndices = this.#getTodayHighLowIndex(entries);
+    const entry = entries[extremaIndices.maxIndex];
+    if (!entry) {
+      throw new Error('No maximum entry found for today');
+    }
+
     return { price: entry.price, validFrom: entry.validFrom, validTo: entry.validTo };
   }
 
@@ -130,25 +158,33 @@ export default class SpotPrices {
   }
 
   get currentPrice(): number {
-    if (!this.#entries) {
+    const entries = this.#entries;
+    if (!entries || entries.length === 0) {
       throw new Error('Only future prices in dataset');
     }
-    const nowIndex = this.#findIndexOfEntryEarlierOrEqual(this.#entries);
-    if (nowIndex < 0) {
+
+    const nowIndex = this.#findIndexOfEntryEarlierOrEqual(entries);
+    const entry = entries[nowIndex];
+    if (nowIndex < 0 || !entry) {
       throw new Error('Only future prices in dataset');
     }
-    return this.#entries[nowIndex].price;
+
+    return entry.price;
   }
 
   get currentPriceDate(): Date {
-    if (!this.#entries) {
+    const entries = this.#entries;
+    if (!entries || entries.length === 0) {
       throw new Error('Only future prices in dataset');
     }
-    const nowIndex = this.#findIndexOfEntryEarlierOrEqual(this.#entries);
-    if (nowIndex < 0) {
+
+    const nowIndex = this.#findIndexOfEntryEarlierOrEqual(entries);
+    const entry = entries[nowIndex];
+    if (nowIndex < 0 || !entry) {
       throw new Error('Only future prices in dataset');
     }
-    return this.#entries[nowIndex].validFrom;
+
+    return entry.validFrom;
   }
 
   get hasTomorrowsPrices(): boolean {
@@ -226,6 +262,7 @@ export default class SpotPrices {
       this.#readCachedPrices();
     } catch (error) {
       console.error(`Request for spot prices from ${spotPricesUrl} returned error:`, error);
+      this.#eventEmitter.emit("Error", error);
       throw error;
     }
   }
@@ -233,16 +270,20 @@ export default class SpotPrices {
   #findIndexOfEntryEarlierOrEqual(datesArray: Array<Date | SpotPriceEntry>, startingFrom = new Date()): number {
     return datesArray.reduce((bestIdx, item, idx) => {
       const date = item instanceof Date ? item : item.validFrom;
-      if (date < startingFrom && (bestIdx === -1 || date > (datesArray[bestIdx] instanceof Date ? datesArray[bestIdx] : datesArray[bestIdx].validFrom))) {
+      const currentBest = datesArray[bestIdx];
+      const currentBestDate = currentBest instanceof Date ? currentBest : currentBest?.validFrom;
+
+      if (date < startingFrom && (bestIdx === -1 || (currentBestDate !== undefined && date > currentBestDate))) {
         return idx;
       }
+
       return bestIdx;
     }, -1);
   }
 
   #getTodayHighLowIndex(entries?: SpotPriceEntry[]): { minIndex: number; maxIndex: number } {
-    if (!Array.isArray(entries)) {
-      throw new TypeError('entries must be an array');
+    if (!Array.isArray(entries) || entries.length === 0) {
+      throw new TypeError('entries must be a non-empty array');
     }
 
     const now = new Date();
@@ -256,6 +297,8 @@ export default class SpotPrices {
 
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
+      if (!entry) continue;
+
       const d = entry.validFrom;
       if (!(d instanceof Date) || isNaN(d.getTime())) {
         throw new Error(`Ungültiges Datum an Index ${i}`);
@@ -308,12 +351,24 @@ export default class SpotPrices {
       const convertedPrices = this.#spotpricedata.price.map((p) => Math.round(p) / 10);
       const times = this.#spotpricedata.unix_seconds.map((d) => new Date(d * 1000));
 
-      const defaultInterval = times.length > 1 ? times[1].getTime() - times[0].getTime() : 60 * 60 * 1000;
+      if (times.length === 0) {
+        return false;
+      }
+
+      const firstTime = times[0];
+      const secondTime = times[1];
+      const defaultInterval = times.length > 1 && firstTime && secondTime ? secondTime.getTime() - firstTime.getTime() : 60 * 60 * 1000;
 
       this.#entries = times.map((t, i) => {
         const validFrom = t;
-        const validTo = i + 1 < times.length ? times[i + 1] : new Date(t.getTime() + defaultInterval);
-        return new SpotPriceEntry(convertedPrices[i], validFrom, validTo);
+        const validTo = i + 1 < times.length ? times[i + 1] ?? new Date(t.getTime() + defaultInterval) : new Date(t.getTime() + defaultInterval);
+        const price = convertedPrices[i];
+
+        if (price === undefined || !validFrom || !validTo) {
+          throw new Error(`Missing price or time value at index ${i}`);
+        }
+
+        return new SpotPriceEntry(price, validFrom, validTo);
       });
 
       this.#prices = this.#entries.map((e) => e.price);
@@ -323,11 +378,15 @@ export default class SpotPrices {
       this.#maxDate = new Date(Math.max(...this.#dates.map((d) => d.getTime())));
 
       this.#updateTimestamp = this.#spotpricedata.updateTimestamp;
+
+      this.#eventEmitter.emit('Updated', { start: this.#minDate, end: this.#maxDate });
+
       return true;
     } catch (error) {
       console.error('Error reading saved spot prices:', error);
+      this.#eventEmitter.emit('Error', error);
+      return false;
     }
-    return false;
   }
 
   async #writeCachedPricesAsync(spotPriceData: SpotPriceRawData): Promise<void> {
@@ -335,6 +394,7 @@ export default class SpotPrices {
       await fs.writeFile(this.#cachedFilePath, JSON.stringify(spotPriceData), { encoding: 'utf-8' });
     } catch (error) {
       console.error('Error saving spot prices:', error);
+      this.#eventEmitter.emit("Error", error);
       throw error;
     }
   }

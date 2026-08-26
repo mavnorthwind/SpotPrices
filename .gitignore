@@ -18,6 +18,14 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
+# Build output
+/dist/
+dist/
+coverage/
+
+# TypeScript
+*.tsbuildinfo
+
 # IDE
 .vscode/
 .idea/

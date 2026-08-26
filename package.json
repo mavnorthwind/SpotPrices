@@ -3,11 +3,12 @@
   "version": "1.0.0",
   "description": "",
   "main": "main.js",
-  "type": "module",
   "scripts": {
-    "test": "node --test",
-    "start": "node main.js",
-    "build": "tsc --project tsconfig.json"
+    "build": "tsc --project tsconfig.json",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "start": "npm run build && node main.js"
   },
   "author": "",
   "license": "ISC",
@@ -15,7 +16,11 @@
     "axios": "^1.16.1"
   },
   "devDependencies": {
-    "@types/node": "^20.12.0",
-    "typescript": "^5.6.0"
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.19.43",
+    "jest": "^30.4.2",
+    "ts-jest": "^29.4.12",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   }
 }
