@@ -237,31 +237,48 @@ export default class SpotPrices {
     return ranges;
   }
 
+  async getSpotPricesAsync(startDate: Date, endDate: Date): Promise<SpotPriceRawData | null> {
+    const start = startDate.toISOString();
+    const end = endDate.toISOString();
+    const spotPricesUrl = `https://api.energy-charts.info/price?bzn=DE-LU&start=${start}&end=${end}`;
+
+    try {
+      const res = await axios.get<SpotPriceRawData>(spotPricesUrl, { timeout: 10000 });
+      console.debug('Got spot price data');
+
+      res.data.updateTimestamp = new Date();
+
+      return res.data;
+    } catch (error) {
+      console.error(`Request for spot prices from ${spotPricesUrl} returned error:`, error);
+      this.#eventEmitter.emit("Error", error);
+
+      return null;
+    }
+  }
+
   async updateSpotPricesAsync(daysBack = 1, daysForward = 1): Promise<void> {
     const now = new Date();
 
     const startDate = new Date(now);
     startDate.setHours(0, 0, 0, 0);
     startDate.setDate(startDate.getDate() - daysBack);
-    const start = startDate.toISOString();
-
+    
     const endDate = new Date(now);
     endDate.setHours(23, 59, 59, 999);
     endDate.setDate(endDate.getDate() + daysForward);
-    const end = endDate.toISOString();
-
-    const spotPricesUrl = `https://api.energy-charts.info/price?bzn=DE-LU&start=${start}&end=${end}`;
 
     try {
-      const res = await axios.get<SpotPriceRawData>(spotPricesUrl, { timeout: 30000 });
-      console.debug('Got spot price data');
+      const data = await this.getSpotPricesAsync(startDate, endDate);
 
-      res.data.updateTimestamp = now;
+      if (data === null) {
+        throw new Error('Failed to fetch spot prices');
+      }
 
-      await this.#writeCachedPricesAsync(res.data);
+      await this.#writeCachedPricesAsync(data);
       this.#readCachedPrices();
     } catch (error) {
-      console.error(`Request for spot prices from ${spotPricesUrl} returned error:`, error);
+      console.error(`Request for spot prices returned error:`, error);
       this.#eventEmitter.emit("Error", error);
       throw error;
     }
