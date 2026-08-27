@@ -297,7 +297,7 @@ export default class SpotPrices extends EventEmitter {
         throw new Error('Failed to fetch spot prices');
       }
 
-      await this.#writeCachedPricesAsync(data);
+      await this.writeCachedPricesAsync(data);
       this.#readCachedPrices();
     } catch (error) {
       console.error(`Request for spot prices returned error:`, error);
@@ -430,15 +430,11 @@ export default class SpotPrices extends EventEmitter {
 
   async writeCachedPricesAsync(spotPriceData: SpotPriceRawData, filename: string = this.#cachedFilePath): Promise<void> {
     try {
-      await fs.writeFile(filename, JSON.stringify(spotPriceData), { encoding: 'utf-8' });
+      await fs.writeFile(filename, JSON.stringify(spotPriceData, null, 2), { encoding: 'utf-8' });
     } catch (error) {
       console.error('Error saving spot prices:', error);
       this.emit("Error", error);
       throw error;
     }
-  }
-
-  async #writeCachedPricesAsync(spotPriceData: SpotPriceRawData): Promise<void> {
-    await this.writeCachedPricesAsync(spotPriceData);
   }
 }

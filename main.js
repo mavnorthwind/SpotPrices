@@ -29,7 +29,7 @@ const spotPrices = new SpotPrices();
     console.log(`Spot prices updated at ${new Date()}`);
   });
 
-
+/*
   for (var i = 27; i > 0; i--) {
     var startDate = new Date("2026-08-"+(i<10?"0":"")+i);
     var endDate = new Date("2026-08-"+(i<10?"0":"")+i+"T23:59:59.999Z");
@@ -38,5 +38,8 @@ const spotPrices = new SpotPrices();
       await spotPrices.writeCachedPricesAsync(prices, "data/" + startDate.toISOString().slice(0,10) + ".json");
     }
   }
+*/
+
+
 })();
 
