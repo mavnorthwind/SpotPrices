@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
 import { EventEmitter } from 'events';
+import { AxiosError } from 'axios';
 
 const currentDirPath = __dirname;
 
@@ -58,7 +59,7 @@ export class SpotPriceEntry {
  * - Warning (message)
  * - Error (message)
  */
-export default class SpotPrices {
+export default class SpotPrices extends EventEmitter {
   #cachedFilePath: string;
   #spotpricedata?: SpotPriceRawData;
   #updateTimestamp?: string | Date;
@@ -69,10 +70,8 @@ export default class SpotPrices {
   #minDate?: Date;
   #maxDate?: Date;
 
-  #eventEmitter: EventEmitter;
-
   constructor(rawSpotPriceData: SpotPriceRawData | null = null) {
-    this.#eventEmitter = new EventEmitter();
+    super();
 
     const basePath = process.argv[1] ? path.dirname(process.argv[1]) : currentDirPath;
     this.#cachedFilePath = path.join(basePath, 'spotPricesCache.json');
@@ -237,24 +236,47 @@ export default class SpotPrices {
     return ranges;
   }
 
-  async getSpotPricesAsync(startDate: Date, endDate: Date): Promise<SpotPriceRawData | null> {
+  async getSpotPricesAsync(startDate: Date, endDate: Date, options?: { timeout?: number, retries?: number }): Promise<SpotPriceRawData | null> {
     const start = startDate.toISOString();
     const end = endDate.toISOString();
     const spotPricesUrl = `https://api.energy-charts.info/price?bzn=DE-LU&start=${start}&end=${end}`;
 
-    try {
-      const res = await axios.get<SpotPriceRawData>(spotPricesUrl, { timeout: 10000 });
-      console.debug('Got spot price data');
+    const maxRetries = options?.retries ?? 3;
+    var attempt = 0;
 
-      res.data.updateTimestamp = new Date();
+    var lastError: any = null;
+    
+    do {
+      try {
+        attempt++;
+        
+        console.debug('Getting spot price data');
+        const res = await axios.get<SpotPriceRawData>(spotPricesUrl, { timeout: options?.timeout ?? 10000 });
+        console.debug('Got spot price data');
 
-      return res.data;
-    } catch (error) {
-      console.error(`Request for spot prices from ${spotPricesUrl} returned error:`, error);
-      this.#eventEmitter.emit("Error", error);
+        res.data.updateTimestamp = new Date();
 
-      return null;
-    }
+        return res.data;
+      } catch (lastError) {
+        console.warn(`Request for spot prices from ${spotPricesUrl} failed:`, lastError);
+        this.emit("Warning", lastError);
+
+        if (lastError instanceof AxiosError &&
+            lastError.response?.status === 429) { // Too Many Requests - backoff and retry
+          
+          const exp  = 1000 * 2 ** attempt;
+          const full = exp + Math.random() * exp; // full jitter
+          const backoffTime = Math.min(full, 30000); // Exponential backoff with jitter capped at 30 seconds
+          console.warn(`Received 429 Too Many Requests. Backing off for ${backoffTime} ms before retrying...`);
+          await new Promise(resolve => setTimeout(resolve, backoffTime));
+        }
+      }
+    } while (attempt <= maxRetries);
+
+    console.error(`Request for spot prices from ${spotPricesUrl} failed after ${maxRetries} attempts:`, lastError);
+    this.emit("Error", lastError);
+
+    return null;
   }
 
   async updateSpotPricesAsync(daysBack = 1, daysForward = 1): Promise<void> {
@@ -279,7 +301,7 @@ export default class SpotPrices {
       this.#readCachedPrices();
     } catch (error) {
       console.error(`Request for spot prices returned error:`, error);
-      this.#eventEmitter.emit("Error", error);
+      this.emit("Error", error);
       throw error;
     }
   }
@@ -396,23 +418,27 @@ export default class SpotPrices {
 
       this.#updateTimestamp = this.#spotpricedata.updateTimestamp;
 
-      this.#eventEmitter.emit('Updated', { start: this.#minDate, end: this.#maxDate });
+      this.emit('Updated', { start: this.#minDate, end: this.#maxDate });
 
       return true;
     } catch (error) {
       console.error('Error reading saved spot prices:', error);
-      this.#eventEmitter.emit('Error', error);
+      this.emit('Error', error);
       return false;
     }
   }
 
-  async #writeCachedPricesAsync(spotPriceData: SpotPriceRawData): Promise<void> {
+  async writeCachedPricesAsync(spotPriceData: SpotPriceRawData, filename: string = this.#cachedFilePath): Promise<void> {
     try {
-      await fs.writeFile(this.#cachedFilePath, JSON.stringify(spotPriceData), { encoding: 'utf-8' });
+      await fs.writeFile(filename, JSON.stringify(spotPriceData), { encoding: 'utf-8' });
     } catch (error) {
       console.error('Error saving spot prices:', error);
-      this.#eventEmitter.emit("Error", error);
+      this.emit("Error", error);
       throw error;
     }
+  }
+
+  async #writeCachedPricesAsync(spotPriceData: SpotPriceRawData): Promise<void> {
+    await this.writeCachedPricesAsync(spotPriceData);
   }
 }

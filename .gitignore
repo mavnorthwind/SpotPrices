@@ -4,6 +4,9 @@ node_modules/
 # Cache files
 spotPricesCache.json
 
+# Data
+data/
+
 # Environment variables
 .env
 .env.local
