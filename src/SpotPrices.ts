@@ -7,13 +7,9 @@ import { AxiosError } from 'axios';
 
 const currentDirPath = __dirname;
 
-type SpotPriceRawData = {
-  unit: string;
-  unix_seconds: number[];
-  price: number[];
-  updateTimestamp: string | Date;
-  [key: string]: unknown;
-};
+import type { SpotPriceRawData } from './types/SpotPriceRawData';
+import { SpotPriceTimeRange } from './types/SpotPriceTimeRange';
+import { SpotPriceEntry } from './types/SpotPriceEntry';
 
 export class SpotPriceTimeRange {
   constructor(
