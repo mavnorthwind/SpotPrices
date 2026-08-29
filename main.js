@@ -29,6 +29,7 @@ const spotPrices = new SpotPrices();
     console.log(`Spot prices updated at ${new Date()}`);
   });
 
+  console.log(`Current spot price: ${spotPrices.currentPriceEntry}`);
 /*
   for (var i = 27; i > 0; i--) {
     var startDate = new Date("2026-08-"+(i<10?"0":"")+i);

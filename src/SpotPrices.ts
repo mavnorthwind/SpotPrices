@@ -11,43 +11,6 @@ import type { SpotPriceRawData } from './types/SpotPriceRawData';
 import { SpotPriceTimeRange } from './types/SpotPriceTimeRange';
 import { SpotPriceEntry } from './types/SpotPriceEntry';
 
-export class SpotPriceTimeRange {
-  constructor(
-    public readonly from: Date,
-    public readonly to: Date,
-    public readonly minPrice: number,
-    public readonly maxPrice: number
-  ) {}
-
-  toString(): string {
-    const from = this.from.toISOString();
-    const to = this.to.toISOString();
-    return `SpotPriceTimeRange(minPrice=${this.minPrice}, maxPrice=${this.maxPrice}, from=${from}, to=${to})`;
-  }
-}
-
-export class SpotPriceEntry {
-  constructor(
-    public readonly price: number,
-    public readonly validFrom: Date,
-    public readonly validTo: Date
-  ) {}
-
-  get durationMs(): number {
-    return this.validTo.getTime() - this.validFrom.getTime();
-  }
-
-  get durationHours(): number {
-    return this.durationMs / (1000 * 60 * 60);
-  }
-
-  toString(): string {
-    const from = this.validFrom.toISOString();
-    const to = this.validTo.toISOString();
-    return `SpotPriceEntry(price=${this.price}, validFrom=${from}, validTo=${to}, durationHours=${this.durationHours.toFixed(2)})`;
-  }
-}
-
 /**
  * Class for fetching and querying energy spot prices
  * Events emitted:
@@ -106,7 +69,7 @@ export default class SpotPrices extends EventEmitter {
     return this.#maxDate;
   }
 
-  get minToday(): { price: number; validFrom: Date; validTo: Date } {
+  get minToday(): SpotPriceEntry {
     const entries = this.#entries;
     if (!entries || entries.length === 0) {
       throw new Error('No price data available');
@@ -118,14 +81,10 @@ export default class SpotPrices extends EventEmitter {
       throw new Error('No minimum entry found for today');
     }
 
-    return { price: entry.price, validFrom: entry.validFrom, validTo: entry.validTo };
+    return entry;
   }
-
-  get minTodayPrice(): number {
-    return this.minToday.price;
-  }
-
-  get maxToday(): { price: number; validFrom: Date; validTo: Date } {
+  
+  get maxToday(): SpotPriceEntry {
     const entries = this.#entries;
     if (!entries || entries.length === 0) {
       throw new Error('No price data available');
@@ -137,49 +96,17 @@ export default class SpotPrices extends EventEmitter {
       throw new Error('No maximum entry found for today');
     }
 
-    return { price: entry.price, validFrom: entry.validFrom, validTo: entry.validTo };
+    return entry;
   }
 
-  get maxTodayPrice(): number {
-    return this.maxToday.price;
-  }
+  get currentPriceEntry(): SpotPriceEntry {
+    const entry = this.#findEntryForDate(new Date());
 
-  get minTodayPriceDate(): Date {
-    return this.minToday.validFrom;
-  }
-
-  get maxTodayPriceDate(): Date {
-    return this.maxToday.validFrom;
-  }
-
-  get currentPrice(): number {
-    const entries = this.#entries;
-    if (!entries || entries.length === 0) {
-      throw new Error('Only future prices in dataset');
+    if (!entry) {
+      throw new Error('No current price entry found');
     }
-
-    const nowIndex = this.#findIndexOfEntryEarlierOrEqual(entries);
-    const entry = entries[nowIndex];
-    if (nowIndex < 0 || !entry) {
-      throw new Error('Only future prices in dataset');
-    }
-
-    return entry.price;
-  }
-
-  get currentPriceDate(): Date {
-    const entries = this.#entries;
-    if (!entries || entries.length === 0) {
-      throw new Error('Only future prices in dataset');
-    }
-
-    const nowIndex = this.#findIndexOfEntryEarlierOrEqual(entries);
-    const entry = entries[nowIndex];
-    if (nowIndex < 0 || !entry) {
-      throw new Error('Only future prices in dataset');
-    }
-
-    return entry.validFrom;
+    
+    return entry;
   }
 
   get hasTomorrowsPrices(): boolean {
@@ -232,6 +159,14 @@ export default class SpotPrices extends EventEmitter {
     return ranges;
   }
 
+  /**
+   * Fetch spot prices for the specified date range from the API with retry logic.
+   * @param startDate Starting date to fetch spot prices
+   * @param endDate Ending date to fetch spot prices
+   * @param options Options like timeout and number of retries
+   * @returns SpotPriceRawData or null if failed to fetch
+   * @throws Error if the request fails after the specified number of retries 
+   */
   async getSpotPricesAsync(startDate: Date, endDate: Date, options?: { timeout?: number, retries?: number }): Promise<SpotPriceRawData | null> {
     const start = startDate.toISOString();
     const end = endDate.toISOString();
@@ -275,6 +210,11 @@ export default class SpotPrices extends EventEmitter {
     return null;
   }
 
+  /**
+   * Fetches spot prices for the specified date range and updates the cached data.
+   * @param daysBack Number of past days to fetch data for
+   * @param daysForward Number of future days to fetch data for
+   */
   async updateSpotPricesAsync(daysBack = 1, daysForward = 1): Promise<void> {
     const now = new Date();
 
@@ -300,6 +240,22 @@ export default class SpotPrices extends EventEmitter {
       this.emit("Error", error);
       throw error;
     }
+  }
+
+  #findEntryForDate(date: Date): SpotPriceEntry | null {
+    if (!Array.isArray(this.#entries) || this.#entries.length === 0) {
+      this.emit('Warning', `No entries available to find entry for date ${date.toISOString()}`);
+      return null;
+    }
+
+    for (const entry of this.#entries) {
+      if (entry.validFrom <= date && entry.validTo > date) {
+        return entry;
+      }
+  }
+
+    this.emit('Warning', `No entry found for date ${date.toISOString()}`);
+    return null;
   }
 
   #findIndexOfEntryEarlierOrEqual(datesArray: Array<Date | SpotPriceEntry>, startingFrom = new Date()): number {
